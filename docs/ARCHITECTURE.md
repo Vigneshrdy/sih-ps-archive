@@ -78,6 +78,13 @@ SIH, committed to this repository as Markdown, and server-rendered for crawlers,
 gate would have protected nothing while costing every reader a login. Reviews, notes,
 votes, comments and team membership stay behind a verified access token.
 
+On the client that means the login form is an on-demand modal `<dialog>`, not a screen
+the app boots into: opening a statement never asks for it, because the per-account
+review read is skipped without a token instead of being allowed to fail. Only a pressed
+account action opens it — saving a review, a private note, a team vote, or creating and
+joining a team — and its back button (or Escape) hands the visitor back to whatever they
+were reading, still mounted underneath.
+
 Where the enforcement actually lives:
 
 - **RLS policies are not the control here.** `anon` and `authenticated` have

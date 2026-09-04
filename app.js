@@ -109,13 +109,26 @@ function reviewFilter(problem) {
   return true;
 }
 
+// Reviews are per-account decoration on public text, on the detail path as much as on
+// the list path -- this is the sibling of loadReviewsForProblems() below and needs the
+// same guard. Without it, opening a statement without an account ran into api()'s
+// account offer and showDetail()'s catch replaced the statement with an error: clicking
+// a problem statement asked for a login. A failed read is not fatal either, because
+// showDetail() has already put the official text on screen.
 async function loadReview(id) {
-  const result = await api(`/api/reviews?ps=${encodeURIComponent(id)}`);
-  const review = normalizeReviewPayload(result);
-  state.reviewCache[id] = review;
-  return review;
+  if (!state.accessToken) return emptyReview();
+  try {
+    const review = normalizeReviewPayload(await api(`/api/reviews?ps=${encodeURIComponent(id)}`));
+    state.reviewCache[id] = review;
+    return review;
+  } catch {
+    return emptyReview();
+  }
 }
 
+// The one review call that does ask for a login, because it is the one the visitor
+// pressed a button for. Throwing keeps callers like setDecision() from rendering a save
+// that never happened.
 async function saveReview(id, payload) {
   const result = await api(`/api/reviews?ps=${encodeURIComponent(id)}`, {
     method: "POST",
@@ -133,8 +146,12 @@ async function loadReviewsForProblems(ids) {
   if (!state.accessToken) return;
   const missing = ids.filter((id) => !(id in state.reviewCache));
   if (!missing.length) return;
-  const result = await api(`/api/reviews?ids=${missing.map(encodeURIComponent).join(",")}`);
-  for (const id of missing) state.reviewCache[id] = normalizeReviewPayload(result.reviews[id] || {});
+  try {
+    const result = await api(`/api/reviews?ids=${missing.map(encodeURIComponent).join(",")}`);
+    for (const id of missing) state.reviewCache[id] = normalizeReviewPayload(result.reviews[id] || {});
+  } catch {
+    // Badges stay blank. A dead session must not blank the statement list with it.
+  }
 }
 
 async function problemForCompare(id) {
@@ -287,7 +304,7 @@ async function api(path, options = {}, retry = true) {
   // with no session means an anonymous visitor pressed an account action -- offer the
   // account instead of spending a 401 and a refresh attempt to find that out.
   if (!state.accessToken) {
-    showGate(SIGN_IN_REQUIRED);
+    openAuthDialog(SIGN_IN_REQUIRED);
     throw new Error(SIGN_IN_REQUIRED);
   }
   const headers = new Headers(options.headers);
@@ -298,7 +315,12 @@ async function api(path, options = {}, retry = true) {
       await refreshAccessToken();
     } catch (error) {
       // Same rule as boot: only a 401 from the refresh means the session is really gone.
-      if (error.status === 401) showGate("Your session expired. Log in again.");
+      // The app stays mounted -- browsing never needed the session -- so this drops the
+      // account and asks for a login instead of tearing the page down.
+      if (error.status === 401) {
+        signOutLocal();
+        openAuthDialog("Your session expired. Log in again.");
+      }
       throw error;
     }
     return api(path, options, false);
@@ -604,6 +626,7 @@ function detailTemplate(problem) {
       ${proseSection("Dataset", problem.dataset)}
     </div><aside>
       <section class="detail-section review-panel"><h3>Your review</h3>
+        ${state.accessToken ? "" : '<p class="gate-status">Reading needs no account. Log in to save a review, a private note or a team vote.</p>'}
         <div class="review-group"><span>Reading</span><div class="review-actions">${Object.entries(READING_STATES).map(([value, label]) => `<button class="review-button ${review.reading === value ? "active" : ""}" type="button" data-set-reading="${value}">${label}</button>`).join("")}<button class="review-button clear" type="button" data-clear-reading>Clear</button></div></div>
         <div class="review-group"><span>Decision</span><div class="review-actions">${Object.entries(DECISION_STATES).map(([value, label]) => `<button class="review-button ${review.decision === value ? "active" : ""}" type="button" data-set-decision="${value}">${label}</button>`).join("")}<button class="review-button clear" type="button" data-clear-decision>Clear</button></div></div>
         ${state.team ? `<div class="review-group"><span>Team vote</span><div class="review-actions">${Object.entries(VOTE_STATES).map(([value, label]) => `<button class="review-button ${review.vote === value ? "active" : ""}" type="button" data-set-vote="${value}">${label}</button>`).join("")}<button class="review-button clear" type="button" data-clear-vote>Clear</button></div><div class="card-statuses"><span class="status-badge vote-yes">Yes ${review.votes.yes}</span><span class="status-badge vote-maybe">Maybe ${review.votes.maybe}</span><span class="status-badge vote-no">No ${review.votes.no}</span></div></div>` : ""}
@@ -931,7 +954,7 @@ function bindEvents() {
   $("#filter-close").addEventListener("click", closeMobileFilters);
   $("#filter-backdrop").addEventListener("click", closeMobileFilters);
   $("#join-group-button").addEventListener("click", () => {
-    if (!state.accessToken) return showGate();
+    if (!state.accessToken) return openAuthDialog("Log in to create or join a team.");
     openTeamDialog(state.team ? "join" : "create");
   });
   $("#group-dialog-close").addEventListener("click", () => $("#group-dialog").close());
@@ -942,7 +965,7 @@ function bindEvents() {
   $("#auth-mode").addEventListener("click", (event) => { const button = event.target.closest("button"); if (button) setAuthMode(button.dataset.mode); });
   $("#auth-form").addEventListener("submit", submitAuth);
   $("#logout-button").addEventListener("click", logout);
-  $("#gate-dismiss").addEventListener("click", dismissGate);
+  $("#auth-back").addEventListener("click", () => $("#access-gate").close());
   window.addEventListener("popstate", route);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && filters.classList.contains("open")) closeMobileFilters();
@@ -963,7 +986,6 @@ function closeMobileFilters() {
 
 async function startApp() {
   $("#boot-screen").hidden = true;
-  $("#access-gate").hidden = true;
   $("#navbar").hidden = false;
   renderTeamBar();
   if (pendingRoute) {
@@ -1243,31 +1265,27 @@ function endTour() {
   localStorage.setItem("sih-tour-done", "1");
 }
 
-function showGate(message = "") {
-  clearSession();
-  state.accessToken = "";
-  state.team = null;
-  state.currentProblem = null;
-  state.reviewCache = {};
-  $("#boot-screen").hidden = true;
-  // Hide the app shell, not just cover it: otherwise the search box and the filter
-  // button behind the gate stay in the tab order.
-  $("#list-view").hidden = true;
-  $("#detail-view").hidden = true;
-  $("#access-gate").hidden = false;
-  $("#navbar").hidden = true;
+// Opening this used to mean tearing the app down: clear the session, drop the current
+// problem, hide #navbar, #list-view and #detail-view. None of that is needed once the
+// form is a modal <dialog> -- showModal() makes the rest of the document inert, so the
+// controls behind it leave the tab order on their own and the statement the visitor was
+// reading is still there when they press Escape or Back.
+function openAuthDialog(message = "") {
+  const dialog = $("#access-gate");
   $("#gate-status").textContent = message;
   $("#gate-status").classList.toggle("error", Boolean(message));
   $("#auth-submit").disabled = false;
+  if (!dialog.open) dialog.showModal();
 }
 
-// The gate is now an offer, not a wall: the statements are public, so dismissing it
-// has to put the visitor back where they were rather than leave a blank page.
-function dismissGate() {
-  $("#access-gate").hidden = true;
-  $("#navbar").hidden = false;
+// Dropping the session leaves the visitor exactly where they are: every statement stays
+// readable without an account, so there is nothing to unmount.
+function signOutLocal() {
+  clearSession();
+  state.accessToken = "";
+  state.team = null;
+  state.reviewCache = {};
   renderTeamBar();
-  route();
 }
 
 async function submitAuth(event) {
@@ -1296,7 +1314,12 @@ async function submitAuth(event) {
     state.team = result.team || null;
     saveSession(result);
     $("#auth-password").value = "";
+    // The session brings reviews, notes and votes the anonymous view never fetched, so
+    // whatever is on screen is re-rendered with them. Behind the still-open dialog: a
+    // failure here has to land in #gate-status where the visitor can read it.
+    state.reviewCache = {};
     await startApp();
+    $("#access-gate").close();
     toast(action === "signup" ? "Account created — welcome" : "Login successful");
   } catch (error) {
     status.textContent = error.message;
@@ -1321,13 +1344,8 @@ async function logout() {
     history.replaceState({}, "", "/");
     // Logging out drops back to anonymous browsing rather than to a wall: the
     // statements were never the thing the account protected.
-    clearSession();
-    state.accessToken = "";
-    state.team = null;
-    state.reviewCache = {};
+    signOutLocal();
     state.view = "list";
-    $("#access-gate").hidden = true;
-    renderTeamBar();
     route();
     toast("You are logged out.");
   }
@@ -1357,7 +1375,6 @@ async function boot() {
   // list is never gated -- an anonymous cold load makes exactly one request and never
   // waits on Supabase.
   $("#boot-screen").hidden = false;
-  $("#access-gate").hidden = true;
   try {
     await startApp();
   } catch (error) {

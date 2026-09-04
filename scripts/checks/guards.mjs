@@ -80,14 +80,26 @@ for (const anchor of [
 assert.equal((html.match(/<h1[\s>]/g) || []).length, 1, "exactly one h1 in the shell");
 
 // The navbar carries the work: search and the filter trigger live inside <header>, not
-// inside #list-view. Two things depend on that. showGate() hides #navbar to pull those
-// controls out of the tab order behind the gate, and the tour spotlights #filter-button
-// because it is positioned from a live rect and the drawer's own controls are offscreen.
+// inside #list-view. The tour depends on that -- it spotlights #filter-button because it
+// is positioned from a live rect and the drawer's own controls are offscreen.
 const navbar = html.slice(html.indexOf('<header class="navbar"'), html.indexOf("</header>"));
 for (const id of ['id="search"', 'id="filter-button"', 'id="join-group-button"']) {
   assert.ok(navbar.includes(id), `the navbar carries ${id}`);
 }
-assert.match(app, /\$\("#navbar"\)\.hidden = true/, "showGate() hides the navbar, so search is not tabbable behind the gate");
+
+// Reading a problem statement needs no account, and asking for one has to leave the
+// statement on screen. loadReview() is the sibling loadReviewsForProblems() already
+// guarded: without the same check, opening a statement anonymously hit api()'s account
+// offer and showDetail()'s catch overwrote the official text with an error.
+assert.doesNotMatch(app, /function showGate\b/, "signing in is an on-demand dialog, not a gate that unmounts the app");
+assert.match(html, /<dialog class="auth-dialog" id="access-gate"/, "the login form is a dismissible modal");
+assert.ok(html.includes('id="auth-back"'), "the login dialog offers a way back to the statements");
+assert.match(app, /function openAuthDialog[\s\S]{0,400}dialog\.showModal\(\)/,
+  "showModal() supplies the focus trap and inert background the old gate faked by hiding #navbar");
+const loadReview = app.slice(app.indexOf("async function loadReview(id)"), app.indexOf("async function saveReview"));
+assert.match(loadReview, /if \(!state\.accessToken\) return emptyReview\(\)/, "opening a statement never asks for a login");
+assert.match(loadReview, /catch \{\s*\n\s*return emptyReview\(\)/, "a dead review read leaves the rendered statement alone");
+assert.match(app, /async function loadReviewsForProblems[\s\S]*?if \(!state\.accessToken\) return/, "list badges stay anonymous too");
 
 // No build step, so a renamed id in index.html is only caught at runtime -- and
 // bindEvents() runs at boot, where addEventListener on null blanks the whole page.
@@ -105,6 +117,12 @@ const css = fs.readFileSync(new URL("../../styles.css", import.meta.url), "utf8"
 for (const rule of [/^\.navbar \{[^}]*height: var\(--nav-h\)/m, /^\.detail-bar \{[^}]*top: var\(--nav-h\)/m, /^\.filters \{[^}]*top: var\(--nav-h\)/m]) {
   assert.match(css, rule, "the sticky bars share --nav-h instead of repeating a magic number");
 }
+
+// api/statement.js steps <h1 id="page-title"> down to an h2, and an anonymous visitor
+// can walk back from a rendered statement to the list, so the list heading has to be
+// styled by id as well as by tag or it loses its type on the way back.
+assert.match(css, /^\.page-head h1, \.page-head #page-title \{/m, "the list heading is styled by id as well as by tag");
+assert.match(css, /^dialog\.auth-dialog \{/m, "the login dialog is sized as a dialog, not as the full-screen boot panel");
 
 assert.match(statement, /s-maxage=3600/, "statement pages are CDN-cached, not rendered per crawl");
 const vercel = JSON.parse(fs.readFileSync(new URL("../../vercel.json", import.meta.url), "utf8"));

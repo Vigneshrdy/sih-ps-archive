@@ -57,12 +57,22 @@
       </div>
     </section>
 
-    <section class="access-gate" id="access-gate" aria-labelledby="access-title" hidden>
-      <div class="gate-panel">
+    <!-- Signing in is an interruption, not a wall: the app stays mounted underneath, so
+         Escape and the back button hand the visitor back to whatever they were reading.
+         A native <dialog> supplies the focus trap and the inert background that the old
+         full-screen section faked by hiding #navbar, #list-view and #detail-view. -->
+    <dialog class="auth-dialog" id="access-gate" aria-labelledby="access-title">
+      <div class="auth-card">
+        <button class="text-button auth-back" id="auth-back" type="button">&larr; Back to the statements</button>
         <img class="brand-mark" src="/assets/logo.jpg" alt="SIH Selection Desk logo" />
         <p class="eyebrow">SIH 2026 Selection Desk</p>
-        <h2 id="access-title">Sign in to shortlist<br />with your team.</h2>
-        <p>The 226 official Smart India Hackathon 2026 problem statements are free to read without an account. Sign in to keep private notes, mark statements read or decided, form a six-member team and vote together.</p>
+        <h2 id="access-title">Keep track of<br />your shortlist.</h2>
+        <p class="auth-lede">Reading the official Smart India Hackathon 2026 problem statements needs no account. Sign in only for the parts that have to be saved.</p>
+        <ul class="auth-perks">
+          <li>Mark statements to read, keep, accept or reject</li>
+          <li>Write a private note on any statement</li>
+          <li>Vote and compare notes with up to six teammates</li>
+        </ul>
 
         <div class="segmented team-switch" id="auth-mode" role="group" aria-label="Authentication mode">
           <button class="active" type="button" data-mode="login">Log in</button>
@@ -71,12 +81,11 @@
         <form class="auth-form" id="auth-form">
           <label><span>Email</span><input id="auth-email" type="email" required autocomplete="email" /></label>
           <label><span>Password</span><input id="auth-password" type="password" required minlength="8" maxlength="72" autocomplete="current-password" /></label>
-          <p class="gate-status" id="gate-status" role="status">Checking your session…</p>
+          <p class="gate-status" id="gate-status" role="status"></p>
           <button class="primary-button" id="auth-submit" type="submit">Log in</button>
-          <button class="text-button" id="gate-dismiss" type="button">Keep browsing without an account</button>
         </form>
       </div>
-    </section>
+    </dialog>
 
     <header class="navbar" id="navbar">
       <a class="brand" href="/" aria-label="SIH Selection Desk home">

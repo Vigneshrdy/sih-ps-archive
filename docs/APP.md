@@ -45,7 +45,7 @@ reviews, team votes and per-team comments.
 - **Filters** — theme, organization, category, dataset availability, starred items, hidden rejected items, PS-number range, quick picks
 - **Full statement view** — official description, expected solution, organization, department, category, theme, dataset link
 - **Server-rendered statement pages** — `/problem-statements/SIH26011` returns real HTML with its own title, description and JSON-LD, so crawlers and link previews work without JavaScript
-- **Reads without an account** — statements are public; signing in adds the private and team features
+- **Reads without an account** — statements are public, and opening one never asks for a login; the form is a dismissible dialog that only a save-shaped action opens, with a back button to the statement you were reading
 - **Six-member teams** — create or join with name + password, seat 1 is the lead, automatic lead succession, one team per user
 - **Reviews** — private per-problem reading state (`to read` / `read`), decision (`keep` / `accept` / `reject`), private note (4000 chars), team votes (`yes` / `maybe` / `no`) with live totals
 - **Review board** — status-grouped board, card badges, summary bar, compare up to 4 statements, markdown export
